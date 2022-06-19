@@ -1,4 +1,5 @@
 import UIKit
+import Foundation
 
 // MARK: Models
 
@@ -18,93 +19,53 @@ struct Post: Codable {
 struct ContentService {
     
     typealias Content = (users: [User], post: [Post])
-    typealias ContentHandler = (Result<Content, Error>) -> Void
+    
     enum ContentError: Error {
         case invalidRequest
         case failedToDecode
         case custom(error: Error)
     }
     
-    func fetchContent(completion: @escaping ContentHandler) {
-        fetch(URL(string: "https://jsonplaceholder.typicode.com/users")!,
-              type: [User].self) { res in
-            
-            switch res {
-                
-            case .success(let users):
-                
-                let users = users
-                
-                fetch(URL(string: "https://jsonplaceholder.typicode.com/posts")!,
-                      type: [Post].self) { res in
-                    
-                    switch res {
-                        
-                    case .success(let posts):
-                        
-                        let posts = posts
-                        completion(.success((users, posts)))
-                        
-                    case .failure(let err):
-                        completion(.failure(err))
-                    }
-                }
-                
-            case .failure(let err):
-                // Failed to handle error path here
-                break
-            }
-        }
+    let usersUrl = URL(string: "https://jsonplaceholder.typicode.com/users")!
+    let postssUrl = URL(string: "https://jsonplaceholder.typicode.com/posts")!
+    
+    
+    func fetchContent() async throws -> Content {
+        
+        let users = try await fetch(usersUrl, type: [User].self)
+        let posts = try await fetch(postssUrl, type: [Post].self)
+        
+        return (users, posts)
     }
     
-    private func fetch<T: Codable>(_ url: URL,
-                                   type: T.Type,
-                                   completion: @escaping (Result<T, Error>) -> Void) {
+    private func fetch<T: Codable>(_ url: URL, type: T.Type) async throws -> T {
         
-       
-        URLSession
-            .shared
-            .dataTask(with: url) { data, response, error in
-            
-                DispatchQueue.main.async {
-                    
-                    if let error = error {
-                        completion(.failure(ContentError.custom(error: error)))
-                        return
-                    }
-                    
-                    if let response = response as? HTTPURLResponse,
-                       response.statusCode == 200 {
-                        
-                        guard let data = data,
-                              let decodedData = try? JSONDecoder().decode(T.self, from: data) else {
-                               completion(.failure(ContentError.failedToDecode))
-                               return
-                        }
-                        
-                        completion(.success(decodedData))
-                        
-                    } else {
-                        completion(.failure(ContentError.invalidRequest))
-                    }
-                }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200 else {
+            throw ContentError.invalidRequest
+        }
+        
+        let decodedData = try JSONDecoder().decode(T.self, from: data)
+        return decodedData
 
-                
-        }.resume()
     }
 }
 
 let service = ContentService()
-service.fetchContent { res in
-    switch res {
-    case .success(let data):
-        print("/***START OF USERS***/")
+
+Task {
+    
+    do {
+        let data = try await service.fetchContent()
+        print("start of users")
         dump(data.users)
-        print("/***END OF USERS***/")
-        print("/***START OF POSTS***/")
+        print("start of posts")
         dump(data.post)
-        print("/***END OF POSTS***/")
-    case .failure(let error):
+    } catch {
         print(error)
+        
     }
+    
+    
 }
